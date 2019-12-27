@@ -1,11 +1,11 @@
 /*
- * Copyright 2002-2015 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,10 +21,10 @@ import java.util.Collections;
 import java.util.Currency;
 import java.util.Locale;
 import java.util.Set;
+
 import javax.money.CurrencyUnit;
+import javax.money.Monetary;
 import javax.money.MonetaryAmount;
-import javax.money.MonetaryAmounts;
-import javax.money.MonetaryCurrencies;
 
 import org.springframework.context.support.EmbeddedValueResolutionSupport;
 import org.springframework.format.AnnotationFormatterFactory;
@@ -49,6 +49,9 @@ import org.springframework.util.StringUtils;
 public class Jsr354NumberFormatAnnotationFormatterFactory extends EmbeddedValueResolutionSupport
 		implements AnnotationFormatterFactory<NumberFormat> {
 
+	private static final String CURRENCY_CODE_PATTERN = "\u00A4\u00A4";
+
+
 	@Override
 	@SuppressWarnings("unchecked")
 	public Set<Class<?>> getFieldTypes() {
@@ -67,19 +70,20 @@ public class Jsr354NumberFormatAnnotationFormatterFactory extends EmbeddedValueR
 
 
 	private Formatter<MonetaryAmount> configureFormatterFrom(NumberFormat annotation) {
-		if (StringUtils.hasLength(annotation.pattern())) {
-			return new NumberDecoratingFormatter(null, resolveEmbeddedValue(annotation.pattern()));
+		String pattern = resolveEmbeddedValue(annotation.pattern());
+		if (StringUtils.hasLength(pattern)) {
+			return new PatternDecoratingFormatter(pattern);
 		}
 		else {
 			Style style = annotation.style();
-			if (style == Style.PERCENT) {
-				return new NumberDecoratingFormatter(new PercentStyleFormatter(), null);
+			if (style == Style.NUMBER) {
+				return new NumberDecoratingFormatter(new NumberStyleFormatter());
 			}
-			else if (style == Style.NUMBER) {
-				return new NumberDecoratingFormatter(new NumberStyleFormatter(), null);
+			else if (style == Style.PERCENT) {
+				return new NumberDecoratingFormatter(new PercentStyleFormatter());
 			}
 			else {
-				return new NumberDecoratingFormatter(null, null);
+				return new NumberDecoratingFormatter(new CurrencyStyleFormatter());
 			}
 		}
 	}
@@ -89,38 +93,72 @@ public class Jsr354NumberFormatAnnotationFormatterFactory extends EmbeddedValueR
 
 		private final Formatter<Number> numberFormatter;
 
+		public NumberDecoratingFormatter(Formatter<Number> numberFormatter) {
+			this.numberFormatter = numberFormatter;
+		}
+
+		@Override
+		public String print(MonetaryAmount object, Locale locale) {
+			return this.numberFormatter.print(object.getNumber(), locale);
+		}
+
+		@Override
+		public MonetaryAmount parse(String text, Locale locale) throws ParseException {
+			CurrencyUnit currencyUnit = Monetary.getCurrency(locale);
+			Number numberValue = this.numberFormatter.parse(text, locale);
+			return Monetary.getDefaultAmountFactory().setNumber(numberValue).setCurrency(currencyUnit).create();
+		}
+	}
+
+
+	private static class PatternDecoratingFormatter implements Formatter<MonetaryAmount> {
+
 		private final String pattern;
 
-		public NumberDecoratingFormatter(Formatter<Number> numberFormatter, String pattern) {
-			this.numberFormatter = numberFormatter;
+		public PatternDecoratingFormatter(String pattern) {
 			this.pattern = pattern;
 		}
 
 		@Override
 		public String print(MonetaryAmount object, Locale locale) {
-			Formatter<Number> formatterToUse = this.numberFormatter;
-			if (formatterToUse == null) {
-				CurrencyStyleFormatter formatter = new CurrencyStyleFormatter();
-				formatter.setCurrency(Currency.getInstance(object.getCurrency().getCurrencyCode()));
-				formatter.setPattern(this.pattern);
-				formatterToUse = formatter;
-			}
-			return formatterToUse.print(object.getNumber(), locale);
+			CurrencyStyleFormatter formatter = new CurrencyStyleFormatter();
+			formatter.setCurrency(Currency.getInstance(object.getCurrency().getCurrencyCode()));
+			formatter.setPattern(this.pattern);
+			return formatter.print(object.getNumber(), locale);
 		}
 
 		@Override
 		public MonetaryAmount parse(String text, Locale locale) throws ParseException {
-			Currency currency = Currency.getInstance(locale);
-			Formatter<Number> formatterToUse = this.numberFormatter;
-			if (formatterToUse == null) {
-				CurrencyStyleFormatter formatter = new CurrencyStyleFormatter();
-				formatter.setCurrency(currency);
-				formatter.setPattern(this.pattern);
-				formatterToUse = formatter;
+			CurrencyStyleFormatter formatter = new CurrencyStyleFormatter();
+			Currency currency = determineCurrency(text, locale);
+			CurrencyUnit currencyUnit = Monetary.getCurrency(currency.getCurrencyCode());
+			formatter.setCurrency(currency);
+			formatter.setPattern(this.pattern);
+			Number numberValue = formatter.parse(text, locale);
+			return Monetary.getDefaultAmountFactory().setNumber(numberValue).setCurrency(currencyUnit).create();
+		}
+
+		private Currency determineCurrency(String text, Locale locale) {
+			try {
+				if (text.length() < 3) {
+					// Could not possibly contain a currency code ->
+					// try with locale and likely let it fail on parse.
+					return Currency.getInstance(locale);
+				}
+				else if (this.pattern.startsWith(CURRENCY_CODE_PATTERN)) {
+					return Currency.getInstance(text.substring(0, 3));
+				}
+				else if (this.pattern.endsWith(CURRENCY_CODE_PATTERN)) {
+					return Currency.getInstance(text.substring(text.length() - 3));
+				}
+				else {
+					// A pattern without a currency code...
+					return Currency.getInstance(locale);
+				}
 			}
-			Number numberValue = formatterToUse.parse(text, locale);
-			CurrencyUnit currencyUnit = MonetaryCurrencies.getCurrency(currency.getCurrencyCode());
-			return MonetaryAmounts.getDefaultAmountFactory().setNumber(numberValue).setCurrency(currencyUnit).create();
+			catch (IllegalArgumentException ex) {
+				throw new IllegalArgumentException("Cannot determine currency for number value [" + text + "]", ex);
+			}
 		}
 	}
 

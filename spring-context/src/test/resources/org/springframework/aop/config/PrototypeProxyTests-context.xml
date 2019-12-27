@@ -2,8 +2,8 @@
 <beans xmlns="http://www.springframework.org/schema/beans"
 		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 		xmlns:aop="http://www.springframework.org/schema/aop"
-		xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.0.xsd
-				http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-2.0.xsd">
+		xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans-2.0.xsd
+				http://www.springframework.org/schema/aop https://www.springframework.org/schema/aop/spring-aop-2.0.xsd">
 
 	<bean id="service" class="org.springframework.tests.sample.beans.TestBean" scope="prototype"/>
 
@@ -19,7 +19,7 @@
 
 	<bean id="serviceInterceptor" class="org.springframework.aop.interceptor.DebugInterceptor"/>
 
-	<aop:config proxy-target-class="false"> 
+	<aop:config proxy-target-class="false">
 		<aop:pointcut id="servicePointcut" expression="target(org.springframework.tests.sample.beans.ITestBean)"/>
 		<aop:advisor advice-ref="serviceInterceptor" pointcut-ref="servicePointcut"/>
 	</aop:config>
